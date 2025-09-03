@@ -21,6 +21,17 @@
   }
   .pawn { background-color: yellow !important; }
   .highlight { border: 2px solid red; background-color: lightblue; }
+
+  /* 🔥 highlight active player on score */
+  .active-turn {
+    background-color: yellow;
+    padding: 4px 8px;
+    border-radius: 6px;
+  }
+  .chosen {
+  background-color: #fff8b0 !important; /* pale yellow */
+  border: 2px solid orange;
+}
 </style>
 </head>
 <body>
@@ -165,24 +176,83 @@ function calculateFinal(index, direction) {
 }
 
 // ------------------------------ Jogada Normal ------------------------------
-function makeMove(index, direction) {
-  if(!validChoices(pawn).includes(index)) return;
+async function makeMoveAnimated(index, direction) {
+  if (!validChoices(pawn).includes(index)) return;
+
+  // 🔥 Highlight the chosen field before sowing
+  let startEl = document.getElementsByClassName('circle')[index];
+  startEl.classList.add('chosen');
+  await new Promise(r => setTimeout(r, 600));
+  startEl.classList.remove('chosen');
+
   let n = circles.length;
   let seeds = circles[index];
   circles[index] = 0;
   let pos = index;
-  while(seeds > 0) {
+
+  render(); // show emptying of selected field
+
+  // Animate sowing
+  for (let i = 0; i < seeds; i++) {
+    await new Promise(r => setTimeout(r, 400)); // delay per seed
     pos = (pos + direction + n) % n;
     circles[pos] += 1;
-    seeds--;
+
+    render();
+
+    // Highlight this circle briefly
+    let el = document.getElementsByClassName('circle')[pos];
+    el.classList.add('highlight');
+    setTimeout(() => el.classList.remove('highlight'), 350);
   }
-  if(circles[pos] === 1) { score[turn] += 1; circles[pos] = 0; }
+
+  // Capture rule
+  if (circles[pos] === 1) {
+    await new Promise(r => setTimeout(r, 400)); // pause before capture
+    score[turn] += 1;
+    circles[pos] = 0;
+    render();
+  }
+
   pawn = pos;
   removeAdjacentIfBlocked();
   turn = turn === 1 ? 2 : 1;
   removeHighlights();
   render();
-  if(gameStarted && turn !== humanPlayer) setTimeout(botMove, 10);
+
+  // Next move logic
+  if (gameStarted) {
+    if (mode === 'botbot') {
+      setTimeout(botMove, 1200);
+    } else if (turn !== humanPlayer) {
+      setTimeout(botMove, 1200);
+    }
+  }
+}
+
+// ------------------------------ JOGADA BOT -----------------------
+function makeMoveInstant(index, direction) {
+  if (!validChoices(pawn).includes(index)) return;
+
+  let n = circles.length;
+  let seeds = circles[index];
+  circles[index] = 0;
+  let pos = index;
+
+  while (seeds > 0) {
+    pos = (pos + direction + n) % n;
+    circles[pos] += 1;
+    seeds--;
+  }
+
+  if (circles[pos] === 1) {
+    score[turn] += 1;
+    circles[pos] = 0;
+  }
+
+  pawn = pos;
+  removeAdjacentIfBlocked();
+  turn = turn === 1 ? 2 : 1;
 }
 
 // ------------------------------ BOT ------------------------------
@@ -206,10 +276,13 @@ function simulateMove(board, pawnPos, index, direction) {
 
 function botMove(){
   if(!gameStarted) return;
+  if (humanPlayer && turn === humanPlayer) return; // don’t steal human’s turn
+
   let choices = validChoices(pawn);
   if(choices.length===0){ 
     removeAdjacentIfBlocked(); 
     render(); 
+    if (mode === 'botbot') setTimeout(botMove, 800);
     return; 
   }
 
@@ -235,8 +308,60 @@ function botMove(){
 
   if(bestMoves.length > 0){
     const move = bestMoves[Math.floor(Math.random() * bestMoves.length)];
-    makeMove(move.idx, move.dir);
+    makeMoveAnimated(move.idx, move.dir);
   }
+}
+
+// --------------------------- BOT SIMULATION ---------------------------
+function botMoveSim(board, pawnPos, turn, score){
+  let choices = validChoices(pawnPos, board);
+  if(choices.length===0){
+    let result = removeAdjacentIfBlocked_sim(board, pawnPos);
+    return { board: result.board, pawn: result.pawnPos, turn: turn, score: score };
+  }
+
+  let bestMoves = [];
+  let maxCap = -1;
+
+  for(let idx of choices){
+    let dirs=[];
+    if(idx===(pawnPos-1+board.length)%board.length) dirs=[-1];
+    else if(idx===(pawnPos+1)%board.length) dirs=[1];
+    else dirs=[-1,1];
+
+    for(let dir of dirs){
+      let sim = simulateMove(board,pawnPos,idx,dir);
+      if(sim.captured > maxCap){
+        maxCap = sim.captured;
+        bestMoves = [{idx, dir}];
+      } else if(sim.captured === maxCap){
+        bestMoves.push({idx, dir});
+      }
+    }
+  }
+
+  const move = bestMoves[Math.floor(Math.random() * bestMoves.length)];
+  let newBoard = board.slice();
+  let seeds = newBoard[move.idx];
+  newBoard[move.idx] = 0;
+  let pos = move.idx;
+  const n = newBoard.length;
+
+  while(seeds>0){
+    pos = (pos + move.dir + n) % n;
+    newBoard[pos]+=1;
+    seeds--;
+  }
+
+  if(newBoard[pos]===1){
+    score[turn]+=1;
+    newBoard[pos]=0;
+  }
+
+  pawnPos = pos;
+  let result = removeAdjacentIfBlocked_sim(newBoard,pawnPos);
+  turn = (turn===1?2:1);
+  return { board: result.board, pawn: result.pawnPos, turn: turn, score: score };
 }
 
 // ------------------------------ UI / Fluxo ------------------------------
@@ -244,18 +369,22 @@ function removeHighlights(){
   document.querySelectorAll('.circle').forEach(el=>el.classList.remove('highlight')); 
 }
 
-function showFinalOptions(index){
+function showFinalOptions(index) {
   removeHighlights();
   const n = circles.length;
-  let dirs=[];
-  if(index===(pawn-1+n)%n) dirs=[-1];
-  else if(index===(pawn+1)%n) dirs=[1];
-  else dirs=[-1,1];
-  for(let dir of dirs){
-    let final=calculateFinal(index,dir);
-    let el=document.getElementsByClassName('circle')[final];
+  let dirs = [];
+  if (index === (pawn - 1 + n) % n) dirs = [-1];
+  else if (index === (pawn + 1) % n) dirs = [1];
+  else dirs = [-1, 1];
+
+  for (let dir of dirs) {
+    let final = calculateFinal(index, dir);
+    let el = document.getElementsByClassName('circle')[final];
     el.classList.add('highlight');
-    el.onclick=()=>makeMove(index,dir);
+    el.onclick = () => {
+      if (!gameStarted || turn !== humanPlayer) return;
+      makeMoveAnimated(index, dir);   // 🔥 was makeMove(), now animation
+    };
   }
 }
 
@@ -275,9 +404,23 @@ function startGame() {
   score = {1:0,2:0};
   mode = document.getElementById('modeSelect').value;
   gameStarted = true;
-  if(mode==='human'){ humanPlayer=1; turn=1; }
-  else if(mode==='bot'){ humanPlayer=1; turn=2; setTimeout(botMove,10); }
-  else if(mode==='botbot'){ humanPlayer=0; turn=1; setTimeout(botMove,10); }
+  turn = 1;
+  humanPlayer = 0; // default: no human
+
+  if (mode === 'human') { 
+    humanPlayer = 1; // human is Player 1
+    turn = 1; 
+  } 
+  else if (mode === 'bot') { 
+    humanPlayer = 2; // human is Player 2
+    turn = 1;        // bot starts
+    setTimeout(botMove, 500);
+  } 
+  else if (mode === 'botbot') { 
+    turn = 1;        // both bots
+    setTimeout(botMove, 500);
+  }
+
   render();
 }
 
@@ -305,7 +448,11 @@ function render() {
     };
     boardDiv.appendChild(div);
   }
-  document.getElementById('score').innerText=`Player 1: ${score[1]} | Player 2: ${score[2]}`;
+// 🔥 score with highlight on active player
+  document.getElementById('score').innerHTML =
+    `<span class="${turn===1?'active-turn':''}">Player 1: ${score[1]}</span> | 
+     <span class="${turn===2?'active-turn':''}">Player 2: ${score[2]}</span>`;
+
   if(circles.every(c=>c===0)){
     let winner='';
     if(score[1]>score[2]) winner='Player 1 wins 🎉';
@@ -336,10 +483,13 @@ async function startSimulation(){
     let moveCount = 0;
 
     while(circles.some(c=>c>0)){
-      botMove();
+      let result = botMoveSim(circles, pawn, turn, score);
+      circles = result.board;
+      pawn = result.pawn;
+      turn = result.turn;
+      score = result.score;
       moveCount++;
-      await new Promise(r=>setTimeout(r,0));
-    }
+   }
 
     metrics.player1.push(score[1]);
     metrics.player2.push(score[2]);
@@ -375,6 +525,8 @@ async function startSimulation(){
 
 </body>
 </html>
+
+
 
 
 
