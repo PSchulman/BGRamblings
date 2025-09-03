@@ -73,9 +73,9 @@
     <li>Once a valid move is chosen, you sow, one at a time, one seed per field starting on the next field after the selected one.</li>
     <li>The sowing direction depends on the chosen house:
       <ul>
-        <li>Left of the pawn → counter-clockwise</li>
-        <li>Right of the pawn → clockwise</li>
-        <li>Pawn field → choose clockwise or counter-clockwise.</li>
+        <li>If you choose the field clockwise from the pawn, you must move clockwise.</li>
+        <li>If you choose the field anti-clockwise from the pawn, you must move anti-clockwise.</li>
+        <li>If you choose the field where the pawn is currently located, you may choose to move in either direction.</li>
       </ul>
     </li>
     <li>The pawn is then moved to the field where the last seed was sown.</li>
@@ -375,5 +375,6 @@ async function startSimulation(){
 
 </body>
 </html>
+
 
 
